@@ -32,31 +32,63 @@ const WritingAnimation = ({ character }) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.strokeText(character, centerX, centerY);
 
-    // Animated overlay (solid blue, draws progressively)
+    // Animated overlay (solid blue, draws progressively with path-based animation)
     if (isPlaying) {
       const animateWriting = () => {
         if (progressRef.current < 1) {
-          progressRef.current += 0.015; // Animation speed
+          progressRef.current += 0.008; // Slower animation speed for smoother effect
           
-          // Clear and redraw guide
+          // Clear canvas
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          
+          // Always draw guide (dashed) in background
+          ctx.save();
           ctx.setLineDash([15, 15]);
           ctx.strokeStyle = '#9CA3AF';
           ctx.lineWidth = 4;
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = 0.3; // Lighter guide
           ctx.strokeText(character, centerX, centerY);
+          ctx.restore();
 
-          // Draw animated overlay (simulate writing progress)
+          // Draw animated stroke (solid blue, progressive)
+          // Use clip path to show only the portion that should be visible
+          ctx.save();
+          ctx.beginPath();
+          
+          // Create a clipping region that reveals the character progressively
+          // We'll use a mask approach: draw the character with increasing opacity
           ctx.setLineDash([]);
           ctx.strokeStyle = '#3B82F6'; // Blue-500
           ctx.lineWidth = 6;
-          ctx.globalAlpha = progressRef.current;
+          ctx.globalAlpha = Math.min(progressRef.current, 1);
+          
+          // Use composite operation to create a "reveal" effect
+          ctx.globalCompositeOperation = 'source-over';
           ctx.strokeText(character, centerX, centerY);
+          
+          ctx.restore();
 
           animationFrameRef.current = requestAnimationFrame(animateWriting);
         } else {
           progressRef.current = 1;
+          // Final draw - complete character
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.save();
+          ctx.setLineDash([15, 15]);
+          ctx.strokeStyle = '#9CA3AF';
+          ctx.lineWidth = 4;
+          ctx.globalAlpha = 0.3;
+          ctx.strokeText(character, centerX, centerY);
+          ctx.restore();
+          
+          ctx.save();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = '#3B82F6';
+          ctx.lineWidth = 6;
           ctx.globalAlpha = 1;
+          ctx.strokeText(character, centerX, centerY);
+          ctx.restore();
+          
           setIsPlaying(false);
         }
       };

@@ -9,7 +9,8 @@ const HandwritingCanvas = ({
     strokeWidth = 8,
     onComplete,
     templateImage, // Optional: URL of a letter template to trace
-    canvasRef: externalCanvasRef // Optional: external ref to access canvas
+    canvasRef: externalCanvasRef, // Optional: external ref to access canvas
+    guideCharacter = null // Optional: character to show as dotted guide
 }) => {
     const internalCanvasRef = useRef(null);
     const canvasRef = externalCanvasRef || internalCanvasRef;
@@ -44,7 +45,22 @@ const HandwritingCanvas = ({
                 ctx.globalAlpha = 1.0;
             };
         }
-    }, [width, height, strokeColor, strokeWidth, templateImage]);
+        
+        // Draw guide character (dotted line) if provided
+        if (guideCharacter) {
+            ctx.save();
+            ctx.font = `bold ${Math.min(width, height) * 0.45}px "Noto Sans Thai", "Sarabun", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.strokeStyle = '#9CA3AF'; // Gray-400
+            ctx.lineWidth = 4;
+            ctx.setLineDash([15, 15]); // Dashed Line
+            const centerX = width / 2;
+            const centerY = height / 2 + 15;
+            ctx.strokeText(guideCharacter, centerX, centerY);
+            ctx.restore();
+        }
+    }, [width, height, strokeColor, strokeWidth, templateImage, guideCharacter]);
 
     const startDrawing = (e) => {
         const { offsetX, offsetY } = getCoordinates(e);
@@ -121,6 +137,22 @@ const HandwritingCanvas = ({
                 ctx.drawImage(img, 0, 0, width, height);
                 ctx.globalAlpha = 1.0;
             };
+        }
+        
+        // Redraw guide character
+        if (guideCharacter) {
+            ctx.save();
+            const dpr = window.devicePixelRatio || 1;
+            ctx.font = `bold ${Math.min(width, height) * 0.45 * dpr}px "Noto Sans Thai", "Sarabun", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.strokeStyle = '#9CA3AF';
+            ctx.lineWidth = 4 * dpr;
+            ctx.setLineDash([15 * dpr, 15 * dpr]);
+            const centerX = (canvas.width / dpr) / 2;
+            const centerY = (canvas.height / dpr) / 2 + 15;
+            ctx.strokeText(guideCharacter, centerX, centerY);
+            ctx.restore();
         }
 
         setStrokes([]);

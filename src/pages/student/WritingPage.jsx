@@ -216,7 +216,7 @@ const WritingPage = () => {
       // Show feedback based on result (requires 60%+ confidence - lenient for children)
       if (result.isCorrect && result.confidence >= 60) {
         setScore(prev => prev + 10);
-        toast.success(`ถูกต้อง! 🎉 (ความมั่นใจ: ${result.confidence}%)`, {
+        toast.success(`ถูกต้อง 🎉 (ความมั่นใจ: ${result.confidence}%)`, {
           duration: 3000
         });
       } else {
@@ -244,13 +244,22 @@ const WritingPage = () => {
       // Extract error message from error object
       const errorMessage = error.message || 'เกิดข้อผิดพลาดในการตรวจสอบ';
       
-      // Show user-friendly error message
-      toast.error(errorMessage.includes('API') || errorMessage.includes('network') 
-        ? 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต'
-        : errorMessage.includes('key') || errorMessage.includes('authentication')
-        ? 'การตั้งค่า API ไม่ถูกต้อง กรุณาติดต่อผู้ดูแลระบบ'
-        : 'เกิดข้อผิดพลาดในการตรวจสอบ กรุณาลองใหม่อีกครั้ง'
-      );
+      // Handle quota exceeded error with user-friendly message
+      let userMessage = errorMessage;
+      if (errorMessage.includes('quota') || errorMessage.includes('Quota') || 
+          errorMessage.includes('rate limit') || errorMessage.includes('429')) {
+        userMessage = 'ระบบกำลังใช้งานมากเกินไป กรุณารอสักครู่แล้วลองใหม่ (ประมาณ 1-2 นาที)';
+      } else if (errorMessage.includes('API') || errorMessage.includes('network')) {
+        userMessage = 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต';
+      } else if (errorMessage.includes('key') || errorMessage.includes('authentication')) {
+        userMessage = 'การตั้งค่า API ไม่ถูกต้อง กรุณาติดต่อผู้ดูแลระบบ';
+      } else {
+        userMessage = 'เกิดข้อผิดพลาดในการตรวจสอบ กรุณาลองใหม่อีกครั้ง';
+      }
+      
+      toast.error(userMessage, {
+        duration: errorMessage.includes('quota') ? 6000 : 5000
+      });
       
       // Don't set detectedText to error message - leave it empty or show a generic message
       setDetectedText('');
@@ -288,7 +297,7 @@ const WritingPage = () => {
               </button>
               <div>
                 <h1 className="text-xl font-semibold text-gray-900">
-                  ✍️ ฝึกเขียนภาษาไทยด้วย AI
+                  ฝึกเขียนภาษาไทยด้วย AI
                 </h1>
                 <p className="text-sm text-gray-500">
                   ใช้ AI ตรวจสอบลายมือ
@@ -363,7 +372,7 @@ const WritingPage = () => {
                   )}
                   <div className="flex-1">
                     <p className="font-medium text-gray-800 mb-1">
-                      {isCorrect ? '✨ ถูกต้อง!' : '❌ ยังไม่ถูกต้อง'}
+                      {isCorrect ? 'ถูกต้อง' : 'ยังไม่ถูกต้อง'}
                     </p>
                     <p className="text-sm text-gray-600 mb-2">
                       AI อ่านได้: <span className="font-bold text-lg">{detectedText || '-'}</span>

@@ -636,10 +636,10 @@ const MatchingGameStep = ({ vocabulary }) => {
 
       if (selectedWord.word === word.word) {
         speakText('ถูกต้อง', { rate: 0.5 });
-        toast.success('✅ ถูกต้อง!');
+        toast.success('ถูกต้อง');
       } else {
         speakText('ลองใหม่', { rate: 0.5 });
-        toast.error('❌ ลองอีกครั้ง!');
+        toast.error('ลองอีกครั้ง');
       }
 
       setSelectedWord(null);

@@ -1,21 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   BookOpen,
   Trophy,
-  Lock,
-  Unlock,
-  CheckCircle,
   Settings,
   LogOut,
   Bell,
   BarChart3,
   Play,
-  FileText,
   Star,
-  Clock,
-  TrendingUp,
   Info,
   Pen
 } from 'lucide-react';
@@ -25,6 +19,17 @@ import toast from 'react-hot-toast';
 import { getApiUrl } from '../../utils/apiConfig';
 import GamificationBar from '../../components/GamificationBar';
 import { useNotifications } from '../../context/NotificationContext';
+import StatusLegend from '../../components/student/StatusLegend';
+import StatsCards from '../../components/student/StatsCards';
+import NotificationPanel from '../../components/student/NotificationPanel';
+import {
+  getLessonStatus,
+  getLessonScore,
+  getStarRating,
+  calculateTotalStars,
+  calculateGoldMedals,
+  calculateStamps
+} from '../../utils/lessonHelpers';
 
 const MockStudentDashboard = () => {
   const { user, logout } = useAuth();
@@ -37,15 +42,29 @@ const MockStudentDashboard = () => {
   const [testAttempts, setTestAttempts] = useState([]);
   const [gameAttempts, setGameAttempts] = useState([]);
   const [showRewardInfo, setShowRewardInfo] = useState(false);
+  const [currentGamePage, setCurrentGamePage] = useState(1);
+  const gamesPerPage = 6;
 
   useEffect(() => {
     // Load lessons for student's classroom
     if (user?.id) {
       fetchStudentData();
     }
-  }, [user]);
+  }, [user, fetchStudentData]);
 
-  const fetchStudentData = async () => {
+  // Refresh data when component is focused (e.g., when returning from lesson page)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (user?.id) {
+        fetchStudentData();
+      }
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [user, fetchStudentData]);
+
+  const fetchStudentData = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
 
@@ -163,100 +182,37 @@ const MockStudentDashboard = () => {
         toast.error('กรุณาติดต่อครูเพื่อเพิ่มคุณเข้าไปในห้องเรียน', { duration: 7000 });
       }
     }
-  };
+  }, [user]);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     await logout();
     navigate('/login');
-  };
+  }, [logout, navigate]);
 
-  const getLessonStatus = (lesson) => {
-    // Use the status and canAccess from the API
-    const status = lesson.status || 'LOCKED';
-    const canAccess = lesson.canAccess || false;
-
-    switch (status) {
-      case 'COMPLETED':
-        return { status: 'COMPLETED', icon: CheckCircle, color: 'text-green-600', bgColor: 'bg-green-100', canAccess: true };
-      case 'POST_TEST_READY':
-      case 'GAMES_READY':
-      case 'IN_PROGRESS':
-        return { status: 'IN_PROGRESS', icon: BookOpen, color: 'text-blue-600', bgColor: 'bg-blue-100', canAccess: true };
-      case 'PRE_TEST_READY':
-        return { status: 'PRE_TEST_READY', icon: BookOpen, color: 'text-purple-600', bgColor: 'bg-purple-100', canAccess: false };
-      case 'UNLOCKED':
-        return { status: 'UNLOCKED', icon: Unlock, color: 'text-yellow-600', bgColor: 'bg-yellow-100', canAccess: true };
-      case 'LOCKED':
-      default:
-        return { status: 'LOCKED', icon: Lock, color: 'text-gray-400', bgColor: 'bg-gray-100', canAccess: false };
-    }
-  };
-
-  const getLessonScore = (lessonId) => {
-    // Find test attempts for this lesson
-    const lessonTests = progress.testAttempts?.filter(attempt => {
-      const testLessonId = attempt.test?.lessonId || attempt.test?.lesson_id;
-      return testLessonId === lessonId;
-    }) || [];
-
-    if (lessonTests.length === 0) return null;
-
-    const avgScore = lessonTests.reduce((sum, test) => sum + test.score, 0) / lessonTests.length;
-    return Math.round(avgScore);
-  };
-
-  const getStarRating = (score) => {
-    if (score >= 90) return 3;
-    if (score >= 80) return 2;
-    if (score >= 60) return 1;
-    return 0;
-  };
-
-  // const unreadCount = notifications.filter(n => !n.isRead).length; // Handled by context
-
-  const handleNotificationClick = async (notificationId) => {
-    // If already read, don't do anything
+  const handleNotificationClick = useCallback(async (notificationId) => {
     const notification = notifications.find(n => n.id === notificationId);
     if (notification?.isRead) return;
-
     await markAsRead(notificationId);
-  };
+  }, [notifications, markAsRead]);
 
-  const totalLessons = lessons.length;
-  // Count completed lessons from lessons array (which has status and progress data)
-  // A lesson is completed if its status is 'COMPLETED' or if progress.isCompleted is true
-  const completedLessons = lessons.filter(l => {
-    if (l.status === 'COMPLETED') return true;
-    if (l.progress && l.progress.isCompleted === true) return true;
-    return false;
-  }).length;
-  const overallProgress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
-
-  // Calculate total stars from test attempts
-  const calculateTotalStars = () => {
-    let totalStars = 0;
-    testAttempts.forEach(attempt => {
-      const score = attempt.score || 0;
-      if (score >= 90) totalStars += 3;
-      else if (score >= 80) totalStars += 2;
-      else if (score >= 60) totalStars += 1;
-    });
-    return totalStars;
-  };
-
-  // Calculate gold medals from games with 100% score
-  const calculateGoldMedals = () => {
-    return gameAttempts.filter(attempt => (attempt.score || 0) === 100).length;
-  };
-
-  // Calculate stamps from completed lessons (lessons with progress.isCompleted === true)
-  const calculateStamps = () => {
-    return lessons.filter(lesson => {
-      if (lesson.status === 'COMPLETED') return true;
-      if (lesson.progress && lesson.progress.isCompleted === true) return true;
+  // Memoized calculations
+  const totalLessons = useMemo(() => lessons.length, [lessons]);
+  
+  const completedLessons = useMemo(() => {
+    return lessons.filter(l => {
+      if (l.status === 'COMPLETED') return true;
+      if (l.progress && l.progress.isCompleted === true) return true;
       return false;
     }).length;
-  };
+  }, [lessons]);
+  
+  const overallProgress = useMemo(() => {
+    return totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+  }, [totalLessons, completedLessons]);
+
+  const totalStars = useMemo(() => calculateTotalStars(testAttempts), [testAttempts]);
+  const goldMedals = useMemo(() => calculateGoldMedals(gameAttempts), [gameAttempts]);
+  const stamps = useMemo(() => calculateStamps(lessons), [lessons]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 md:p-8">
@@ -267,18 +223,18 @@ const MockStudentDashboard = () => {
         className="max-w-7xl mx-auto"
       >
         <GamificationBar
-          stars={calculateTotalStars()}
-          coins={calculateGoldMedals()}
-          stamps={calculateStamps()}
+          stars={totalStars}
+          coins={goldMedals}
+          stamps={stamps}
         />
 
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900">
-              สวัสดี, <span className="text-blue-600">{user?.name || 'นักเรียน'}!</span>
+              สวัสดี <span className="text-blue-600">{user?.name ? user.name.replace(/!/g, '') : 'นักเรียน'}</span>
             </h1>
-            <p className="text-gray-600 mt-1">พร้อมเรียนรู้วันนี้หรือยัง? 🎯</p>
+            <p className="text-gray-600 mt-1">พร้อมเรียนรู้วันนี้หรือยัง?</p>
           </div>
 
           <div className="flex items-center gap-4">
@@ -323,96 +279,23 @@ const MockStudentDashboard = () => {
                 </span>
               )}
             </div>
-            {notifications.length === 0 ? (
-              <p className="text-gray-500 text-center py-4">ไม่มีการแจ้งเตือน</p>
-            ) : (
-              <div className="space-y-3">
-                {notifications.slice(0, 5).map((notif) => (
-                  <motion.div
-                    key={notif.id}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => handleNotificationClick(notif.id)}
-                    className={`p-4 rounded-lg border cursor-pointer transition-all ${notif.isRead
-                      ? 'bg-gray-50 border-gray-200 hover:bg-gray-100'
-                      : 'bg-blue-50 border-blue-200 hover:bg-blue-100 shadow-sm'
-                      }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className={`font-semibold ${notif.isRead ? 'text-gray-700' : 'text-gray-900'}`}>
-                            {notif.title}
-                          </h3>
-                          {!notif.isRead && (
-                            <span className="px-2 py-0.5 bg-blue-500 text-white text-xs rounded-full font-bold">
-                              ใหม่
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">{notif.message}</p>
-                        <span className="text-xs text-gray-400 mt-2 block">
-                          {new Date(notif.createdAt).toLocaleDateString('th-TH', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </span>
-                      </div>
-                      {!notif.isRead && (
-                        <div className="ml-2 w-3 h-3 bg-blue-500 rounded-full flex-shrink-0 mt-1 animate-pulse"></div>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
+            <NotificationPanel
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onNotificationClick={handleNotificationClick}
+            />
           </motion.div>
         )}
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <motion.div
-            whileHover={{ scale: 1.03 }}
-            className="bg-white rounded-xl shadow-lg p-6 flex items-center gap-4"
-          >
-            <div className="p-3 bg-blue-100 rounded-full">
-              <BookOpen className="text-blue-600" size={28} />
-            </div>
-            <div>
-              <p className="text-gray-500 text-sm">บทเรียนทั้งหมด</p>
-              <h2 className="text-3xl font-bold text-gray-900">{totalLessons}</h2>
-            </div>
-          </motion.div>
+        <StatsCards
+          totalLessons={totalLessons}
+          completedLessons={completedLessons}
+          overallProgress={overallProgress}
+        />
 
-          <motion.div
-            whileHover={{ scale: 1.03 }}
-            className="bg-white rounded-xl shadow-lg p-6 flex items-center gap-4"
-          >
-            <div className="p-3 bg-green-100 rounded-full">
-              <CheckCircle className="text-green-600" size={28} />
-            </div>
-            <div>
-              <p className="text-gray-500 text-sm">เรียนจบแล้ว</p>
-              <h2 className="text-3xl font-bold text-gray-900">{completedLessons}</h2>
-            </div>
-          </motion.div>
+        <StatusLegend />
 
-          <motion.div
-            whileHover={{ scale: 1.03 }}
-            className="bg-white rounded-xl shadow-lg p-6 flex items-center gap-4"
-          >
-            <div className="p-3 bg-purple-100 rounded-full">
-              <TrendingUp className="text-purple-600" size={28} />
-            </div>
-            <div>
-              <p className="text-gray-500 text-sm">ความคืบหน้า</p>
-              <h2 className="text-3xl font-bold text-gray-900">{overallProgress}%</h2>
-            </div>
-          </motion.div>
-        </div>
+
 
         {/* Lessons Section */}
         <div className="bg-white rounded-xl shadow-lg p-8">
@@ -427,42 +310,49 @@ const MockStudentDashboard = () => {
             </div>
           ) : (
             <div className="space-y-8">
-              {['consonants', 'vowels', 'words', 'sentences'].map((category) => {
-                const categoryLessons = lessons.filter(l => l.category === category);
+              {[
+                { category: 'consonants', title: 'พยัญชนะ', range: 'บทที่ 1-4', orderStart: 1, orderEnd: 4 },
+                { category: 'vowels', title: 'สระ', range: 'บทที่ 5-8', orderStart: 5, orderEnd: 8 }
+              ].map((catConfig) => {
+                // Filter lessons by orderIndex instead of category
+                const categoryLessons = lessons.filter(l => {
+                  const orderIndex = l.orderIndex || parseInt(l.chapter || '1');
+                  return orderIndex >= catConfig.orderStart && orderIndex <= catConfig.orderEnd;
+                });
+                
                 if (categoryLessons.length === 0) return null;
-
-                const categoryTitle = {
-                  consonants: 'พยัญชนะ',
-                  vowels: 'สระ',
-                  words: 'คำพยางค์เดียว',
-                  sentences: 'การแต่งประโยค'
-                }[category];
 
                 // Group by chapter
                 const chapters = {};
                 categoryLessons.forEach(lesson => {
-                  const chapter = lesson.chapter || '1';
+                  const chapter = lesson.chapter || String(lesson.orderIndex || '1');
                   if (!chapters[chapter]) chapters[chapter] = [];
                   chapters[chapter].push(lesson);
                 });
 
                 return (
-                  <div key={category} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                    <div className="bg-blue-50 px-6 py-4 border-b border-blue-100">
-                      <h3 className="text-xl font-bold text-blue-900">หมวด: {categoryTitle}</h3>
+                  <div key={catConfig.category} className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden shadow-lg">
+                    <div className={`px-6 py-4 border-b-2 ${catConfig.category === 'consonants' ? 'bg-gradient-to-r from-blue-100 to-blue-200 border-blue-300' : 'bg-gradient-to-r from-purple-100 to-pink-200 border-purple-300'}`}>
+                      <h3 className={`text-xl font-bold ${catConfig.category === 'consonants' ? 'text-blue-900' : 'text-purple-900'}`}>
+                        หมวด: {catConfig.title}
+                      </h3>
+                      <p className={`text-sm mt-1 ${catConfig.category === 'consonants' ? 'text-blue-700' : 'text-purple-700'}`}>
+                        {catConfig.range}
+                      </p>
                     </div>
 
                     <div className="p-6 space-y-6">
                       {Object.entries(chapters).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true })).map(([chapter, chapterLessons]) => (
                         <div key={chapter}>
-                          <h4 className="text-lg font-semibold text-gray-700 mb-3 pl-2 border-l-4 border-blue-400">
-                            บทที่ {chapter}
-                          </h4>
                           <div className="space-y-4">
                             {chapterLessons.sort((a, b) => a.orderIndex - b.orderIndex).map((lesson) => {
                               const status = getLessonStatus(lesson);
-                              const score = getLessonScore(lesson.id);
+                              const score = getLessonScore(lesson.id, progress);
                               const stars = score ? getStarRating(score) : 0;
+                              
+                              // Get lesson number for cover image
+                              const lessonNumber = lesson.orderIndex || parseInt(lesson.chapter || '1');
+                              const coverImagePath = `/หน้าปกบทเรียน/บทที่${lessonNumber}.png`;
 
                               return (
                                 <motion.div
@@ -470,10 +360,23 @@ const MockStudentDashboard = () => {
                                   whileHover={{ y: -2 }}
                                   className="bg-gray-50 border border-gray-200 rounded-lg p-6 shadow-sm hover:shadow-md transition"
                                 >
-                                  <div className="flex items-center justify-between">
+                                  <div className="flex items-center justify-between gap-4">
                                     <div className="flex items-center gap-4 flex-1">
-                                      <div className={`p-4 ${status.bgColor} rounded-lg`}>
-                                        <status.icon className={status.color} size={32} />
+                                      {/* Cover Image with Icon Overlay */}
+                                      <div className="flex-shrink-0 relative">
+                                        <img
+                                          src={coverImagePath}
+                                          alt={`ปกบทเรียน ${lesson.title}`}
+                                          className="w-48 h-48 object-contain rounded-lg border-2 border-gray-300 shadow-md bg-white"
+                                          onError={(e) => {
+                                            // Hide image if fails to load
+                                            e.target.style.display = 'none';
+                                          }}
+                                        />
+                                        {/* Status Icon Overlay on top of cover image */}
+                                        <div className={`absolute top-2 right-2 p-3 ${status.bgColor} rounded-lg shadow-lg`}>
+                                          <status.icon className={status.color} size={28} />
+                                        </div>
                                       </div>
 
                                       <div className="flex-1">
@@ -489,11 +392,9 @@ const MockStudentDashboard = () => {
                                         <div className="flex items-center gap-4 text-sm flex-wrap">
                                           <span className={`px-3 py-1 rounded-full ${status.bgColor} ${status.color} font-medium`}>
                                             {status.status === 'COMPLETED' && '✅ เรียนจบแล้ว'}
-                                            {status.status === 'POST_TEST_READY' && '📝 พร้อมทำ Post-test'}
-                                            {status.status === 'GAMES_READY' && '🎮 พร้อมเล่นเกม'}
-                                            {status.status === 'IN_PROGRESS' && '📖 กำลังเรียน'}
-                                            {status.status === 'UNLOCKED' && '🔓 พร้อมเรียน'}
-                                            {status.status === 'LOCKED' && '🔒 ล็อกอยู่'}
+                                            {(status.status === 'POST_TEST_READY' || status.status === 'GAMES_READY' || status.status === 'IN_PROGRESS') && '📖 กำลังเรียน'}
+                                            {status.status === 'UNLOCKED' && '🔓 พร้อมเรียน (ยังไม่เริ่ม)'}
+                                            {status.status === 'LOCKED' && '🔒 ล็อกอยู่ (ต้องทำบทก่อนหน้า)'}
                                           </span>
 
                                           {lesson.preTest && (
@@ -503,8 +404,20 @@ const MockStudentDashboard = () => {
                                           )}
 
                                           {lesson.postTest && (
-                                            <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">
-                                              Post-test: {lesson.postTest.testAttempts?.length > 0 ? '✅ ทำแล้ว' : '⏳ ยังไม่ทำ'}
+                                            <span className={`px-2 py-1 rounded text-xs ${
+                                              lesson.progress?.hasPassedPostTest === true
+                                                ? 'bg-green-100 text-green-800'
+                                                : lesson.postTest.testAttempts?.length > 0
+                                                  ? 'bg-orange-100 text-orange-800'
+                                                  : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                              Post-test: {
+                                                lesson.progress?.hasPassedPostTest === true
+                                                  ? '✅ ผ่านแล้ว'
+                                                  : lesson.postTest.testAttempts?.length > 0
+                                                    ? '⚠️ ยังไม่ผ่าน'
+                                                    : '⏳ ยังไม่ทำ'
+                                              }
                                             </span>
                                           )}
 
@@ -532,17 +445,69 @@ const MockStudentDashboard = () => {
 
                                     {/* Action Buttons */}
                                     <div className="flex flex-col gap-2">
-                                      {status.canAccess && status.status !== 'COMPLETED' && (
-                                        <Link
-                                          to={`/dashboard/student/lessons/${lesson.id}`}
-                                          className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium text-center"
-                                        >
-                                          {status.status === 'IN_PROGRESS' ? 'เรียนต่อ' : 'เริ่มเรียน'}
-                                        </Link>
-                                      )}
+                                      {/* Start Lesson Button - Only show if pre-test is completed (if exists) */}
+                                      {status.canAccess && status.status !== 'COMPLETED' && (() => {
+                                        // If lesson has pre-test, check if it's completed
+                                        if (lesson.preTest) {
+                                          const isPreTestCompleted = lesson.preTest.testAttempts?.length > 0;
+                                          // Only show "เริ่มเรียน" button if pre-test is completed
+                                          if (!isPreTestCompleted) {
+                                            return null;
+                                          }
+                                        }
+                                        // If no pre-test or pre-test is completed, show button
+                                        return (
+                                          <Link
+                                            to={`/dashboard/student/lessons/${lesson.id}`}
+                                            className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium text-center"
+                                          >
+                                            {status.status === 'IN_PROGRESS' ? 'เรียนต่อ' : 'เริ่มเรียน'}
+                                          </Link>
+                                        );
+                                      })()}
 
-                                      {/* Pre-test Button - Allow if Locked (to unlock) OR Unlocked (if wants to take it) */}
-                                      {lesson.preTest && (status.status === 'LOCKED' || status.status === 'UNLOCKED') && (
+                                      {/* Pre-test Button - Only show if pre-test is NOT completed yet (can only do once) */}
+                                      {lesson.preTest && (status.status === 'LOCKED' || status.status === 'UNLOCKED' || status.status === 'PRE_TEST_READY') && (() => {
+                                        // Check if pre-test is already completed - if yes, don't show button
+                                        const isPreTestCompleted = lesson.preTest.testAttempts?.length > 0;
+                                        if (isPreTestCompleted) {
+                                          return null; // Hide pre-test button if already completed
+                                        }
+                                        
+                                        // Check if previous lesson's posttest is passed
+                                        // Use lessons from state (all lessons), not filtered lessons
+                                        const currentOrderIndex = lesson.orderIndex || parseInt(lesson.chapter || '1');
+                                        let canShowPreTest = true;
+                                        
+                                        if (currentOrderIndex > 1) {
+                                          // Find previous lesson with orderIndex - 1
+                                          // Sort all lessons by orderIndex first
+                                          const sortedAllLessons = [...lessons].sort((a, b) => {
+                                            const aIndex = a.orderIndex || parseInt(a.chapter || '1');
+                                            const bIndex = b.orderIndex || parseInt(b.chapter || '1');
+                                            return aIndex - bIndex;
+                                          });
+                                          
+                                          const currentIndex = sortedAllLessons.findIndex(l => l.id === lesson.id);
+                                          
+                                          if (currentIndex > 0) {
+                                            const previousLesson = sortedAllLessons[currentIndex - 1];
+                                            
+                                            if (previousLesson) {
+                                              // Check if previous lesson's posttest is passed
+                                              const prevPostTestPassed = previousLesson.progress?.hasPassedPostTest === true;
+                                              const prevLessonCompleted = previousLesson.progress?.isCompleted === true;
+                                              
+                                              // Only show pretest if previous lesson's posttest is passed
+                                              canShowPreTest = prevPostTestPassed && prevLessonCompleted;
+                                            }
+                                          } else {
+                                            // First lesson overall - allow pretest
+                                            canShowPreTest = true;
+                                          }
+                                        }
+                                        
+                                        return canShowPreTest ? (
                                         <Link
                                           to={`/dashboard/student/tests/${lesson.preTest.id || lesson.preTest._id}`}
                                           className="px-6 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition font-medium text-center flex items-center gap-2 justify-center"
@@ -550,20 +515,27 @@ const MockStudentDashboard = () => {
                                           <FileText size={16} />
                                           ทำ Pre-test
                                         </Link>
-                                      )}
+                                        ) : null;
+                                      })()}
 
-                                      {/* Post-test Button - Show after lesson is completed or when status is POST_TEST_READY */}
-                                      {lesson.postTest && (
+                                      {/* Post-test Button - Show when lesson is completed */}
+                                      {lesson.postTest && lesson.progress && lesson.progress.isCompleted && (
                                         (status.status === 'POST_TEST_READY') ||
-                                        (lesson.progress && lesson.progress.isCompleted && !lesson.postTest.testAttempts?.length) ||
-                                        (status.status === 'COMPLETED' && !lesson.postTest.testAttempts?.length)
+                                        (!lesson.postTest.testAttempts?.length) ||
+                                        (lesson.postTest.testAttempts?.length > 0 && lesson.progress.hasPassedPostTest === false)
                                       ) && (
                                           <Link
                                             to={`/dashboard/student/tests/${lesson.postTest.id || lesson.postTest._id}`}
-                                            className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition font-medium text-center flex items-center gap-2 justify-center"
+                                            className={`px-6 py-2 rounded-lg hover:opacity-90 transition font-medium text-center flex items-center gap-2 justify-center ${
+                                              lesson.postTest.testAttempts?.length > 0 && lesson.progress?.hasPassedPostTest === false
+                                                ? 'bg-orange-500 text-white hover:bg-orange-600'
+                                                : 'bg-green-500 text-white hover:bg-green-600'
+                                            }`}
                                           >
                                             <FileText size={16} />
-                                            ทำ Post-test
+                                            {lesson.postTest.testAttempts?.length > 0 && lesson.progress?.hasPassedPostTest === false 
+                                              ? 'ทำ Post-test อีกครั้ง' 
+                                              : 'ทำ Post-test'}
                                           </Link>
                                         )}
 
@@ -582,7 +554,8 @@ const MockStudentDashboard = () => {
                                         </>
                                       )}
 
-                                      {status.status === 'COMPLETED' && (
+                                      {/* Review Button - Show when lesson is completed (regardless of posttest status) */}
+                                      {lesson.progress && lesson.progress.isCompleted && (
                                         <Link
                                           to={`/dashboard/student/lessons/${lesson.id}`}
                                           className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition font-medium text-center"
@@ -619,36 +592,55 @@ const MockStudentDashboard = () => {
         <div className="bg-white rounded-xl shadow-lg p-8 mt-8">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800">🎮 เกมทั้งหมด</h2>
-            <Link
-              to="/dashboard/student/games"
-              className="text-blue-600 hover:text-blue-700 font-medium text-sm"
-            >
-              ดูทั้งหมด →
-            </Link>
           </div>
 
-          {lessons.filter(l => l.games && l.games.length > 0).length === 0 ? (
+          {(() => {
+            // Flatten all games from all lessons
+            const allGames = [];
+            lessons
+              .filter(l => l.games && l.games.length > 0)
+              .forEach((lesson, lessonIndex) => {
+                lesson.games.forEach((game, gameIndex) => {
+                  allGames.push({
+                    ...game,
+                    lesson,
+                    lessonIndex,
+                    gameIndex
+                  });
+                });
+              });
+
+            const totalGames = allGames.length;
+            const totalPages = Math.ceil(totalGames / gamesPerPage);
+            const startIndex = (currentGamePage - 1) * gamesPerPage;
+            const endIndex = startIndex + gamesPerPage;
+            const currentGames = allGames.slice(startIndex, endIndex);
+
+            if (totalGames === 0) {
+              return (
             <div className="text-center py-10 text-gray-500">
               <Play size={48} className="mx-auto mb-4 text-gray-400" />
               <p className="text-lg">ยังไม่มีเกม</p>
               <p className="text-sm mt-2">เรียนบทเรียนเพื่อปลดล็อกเกม</p>
             </div>
-          ) : (
+              );
+            }
+
+            return (
+              <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {lessons
-                .filter(l => l.games && l.games.length > 0)
-                .slice(0, 6)
-                .map((lesson, lessonIndex) => (
-                  lesson.games.map((game, gameIndex) => {
+                  {currentGames.map(({ lesson, lessonIndex, gameIndex, ...game }) => {
                     const gameAttempt = game.gameAttempts?.[0];
                     const bestScore = gameAttempt?.score || 0;
                     // Allow playing if: 
-                    // 1. Lesson status allows games
-                    // 2. OR it's the very first game of the very first lesson (always unlocked)
+                    // 1. Lesson status allows games (GAMES_READY, COMPLETED, IN_PROGRESS)
+                    // 2. OR lesson is unlocked (UNLOCKED) - all games in unlocked lessons should be playable
+                    // 3. OR it's the very first lesson (lessonIndex === 0) - all games should be unlocked
                     const canPlay = lesson.status === 'GAMES_READY' ||
                       lesson.status === 'COMPLETED' ||
                       lesson.status === 'IN_PROGRESS' ||
-                      (lessonIndex === 0 && gameIndex === 0);
+                      lesson.status === 'UNLOCKED' ||
+                      lessonIndex === 0;
 
                     return (
                       <motion.div
@@ -700,10 +692,54 @@ const MockStudentDashboard = () => {
                         )}
                       </motion.div>
                     );
-                  })
-                ))}
+                  })}
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-2 mt-6">
+                    <button
+                      onClick={() => setCurrentGamePage(prev => Math.max(1, prev - 1))}
+                      disabled={currentGamePage === 1}
+                      className={`px-4 py-2 rounded-lg font-medium transition ${
+                        currentGamePage === 1
+                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                          : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                      }`}
+                    >
+                      ← ก่อนหน้า
+                    </button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentGamePage(page)}
+                          className={`w-10 h-10 rounded-lg font-medium transition ${
+                            currentGamePage === page
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setCurrentGamePage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentGamePage === totalPages}
+                      className={`px-4 py-2 rounded-lg font-medium transition ${
+                        currentGamePage === totalPages
+                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                          : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                      }`}
+                    >
+                      ถัดไป →
+                    </button>
             </div>
           )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Quick Actions */}
@@ -718,7 +754,7 @@ const MockStudentDashboard = () => {
               <div className="p-3 bg-pink-100 rounded-full">
                 <Pen className="text-pink-600" size={28} />
               </div>
-              <h3 className="text-xl font-bold text-gray-800">✍️ ฝึกเขียน</h3>
+              <h3 className="text-xl font-bold text-gray-800">ฝึกเขียน</h3>
             </div>
             <p className="text-gray-600 text-sm mb-4">
               ฝึกเขียนภาษาไทยด้วย AI Detection
@@ -736,7 +772,7 @@ const MockStudentDashboard = () => {
               <div className="p-3 bg-indigo-100 rounded-full">
                 <BarChart3 className="text-indigo-600" size={28} />
               </div>
-              <h3 className="text-xl font-bold text-gray-800">📊 ความคืบหน้าของคุณ</h3>
+              <h3 className="text-xl font-bold text-gray-800">ความคืบหน้าของคุณ</h3>
             </div>
             <div className="space-y-3">
               <div className="flex justify-between items-center">
@@ -764,7 +800,7 @@ const MockStudentDashboard = () => {
               <div className="p-3 bg-yellow-100 rounded-full">
                 <Trophy className="text-yellow-600" size={28} />
               </div>
-              <h3 className="text-xl font-bold text-gray-800">�� รางวัลของคุณ</h3>
+              <h3 className="text-xl font-bold text-gray-800">รางวัลของคุณ</h3>
               <button
                 onClick={() => setShowRewardInfo(!showRewardInfo)}
                 className="ml-auto p-1 hover:bg-gray-100 rounded-full transition"
@@ -794,44 +830,22 @@ const MockStudentDashboard = () => {
               <div className="text-center p-3 bg-yellow-50 rounded-lg">
                 <div className="text-3xl mb-1">⭐</div>
                 <p className="text-xs text-gray-600">ดาวทั้งหมด</p>
-                <p className="font-bold text-yellow-600">{calculateTotalStars()}</p>
+                <p className="font-bold text-yellow-600">{totalStars}</p>
               </div>
               <div className="text-center p-3 bg-green-50 rounded-lg">
                 <div className="text-3xl mb-1">🥇</div>
                 <p className="text-xs text-gray-600">เหรียญทอง</p>
-                <p className="font-bold text-green-600">{calculateGoldMedals()}</p>
+                <p className="font-bold text-green-600">{goldMedals}</p>
               </div>
               <div className="text-center p-3 bg-purple-50 rounded-lg">
                 <div className="text-3xl mb-1">🎯</div>
                 <p className="text-xs text-gray-600">ตราประทับ</p>
-                <p className="font-bold text-purple-600">{calculateStamps()}</p>
+                <p className="font-bold text-purple-600">{stamps}</p>
               </div>
             </div>
           </motion.div>
         </div>
 
-        {/* Legend */}
-        <div className="mt-6 bg-white rounded-xl shadow-lg p-6">
-          <h3 className="text-lg font-bold text-gray-800 mb-4">📖 คำอธิบายสถานะ:</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="flex items-center gap-2">
-              <Lock className="text-gray-400" size={20} />
-              <span className="text-sm text-gray-600">🔒 ล็อกอยู่ (ต้องทำบทก่อนหน้า)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Unlock className="text-yellow-600" size={20} />
-              <span className="text-sm text-gray-600">🔓 พร้อมเรียน (ยังไม่เริ่ม)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <BookOpen className="text-blue-600" size={20} />
-              <span className="text-sm text-gray-600">📖 กำลังเรียน</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="text-green-600" size={20} />
-              <span className="text-sm text-gray-600">✅ เรียนจบแล้ว</span>
-            </div>
-          </div>
-        </div>
       </motion.div>
     </div>
   );

@@ -4,11 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   Trophy,
-  Star,
   Clock,
   RotateCcw,
   Target,
-  Volume2
+  Volume2,
+  CheckCircle,
+  Medal
 } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
@@ -28,6 +29,7 @@ const MockGamePage = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [gameStartTime, setGameStartTime] = useState(null);
 
   useEffect(() => {
     const fetchGameData = async () => {
@@ -74,13 +76,39 @@ const MockGamePage = () => {
     setScore(0);
     setMatches({});
     setTimeLeft(300);
+    setGameStartTime(Date.now());
     toast.success('เริ่มเกม!');
   };
 
-  const handleGameComplete = () => {
+  const handleGameComplete = async () => {
     setGameState('result');
     const finalScore = calculateScore();
     setScore(finalScore);
+
+    // Submit game result to backend
+    try {
+      const token = localStorage.getItem('token');
+      const timeSpent = gameStartTime ? Math.floor((Date.now() - gameStartTime) / 1000) : null;
+      
+      await axios.post(
+        getApiUrl(`/student/games/${gameId}/submit`),
+        {
+          score: finalScore,
+          level: 1,
+          timeSpent,
+          data: {
+            matches,
+            totalPairs: game?.settings?.pairs?.length || game?.settings?.items?.length || 0
+          }
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+    } catch (error) {
+      console.error('Error submitting game result:', error);
+      // Don't show error toast to avoid interrupting user experience
+    }
 
     if (finalScore >= 80) {
       setShowConfetti(true);
@@ -118,10 +146,10 @@ const MockGamePage = () => {
 
       // Check correctness (item.groupId should match zone.id)
       if (item.groupId === target.id) {
-        toast.success('✅ ถูกต้อง!');
+        toast.success('ถูกต้อง');
         setScore(prev => prev + 10);
       } else {
-        toast.error('❌ ลองใหม่อีกครั้ง');
+        toast.error('ลองใหม่อีกครั้ง');
         setTimeout(() => {
           setMatches(prev => {
             const updated = { ...prev };
@@ -138,10 +166,10 @@ const MockGamePage = () => {
 
       // Check if they belong to the same pair (correct match)
       if (item.word === target.word) {
-        toast.success('✅ ถูกต้อง!');
+        toast.success('ถูกต้อง');
         setScore(prev => prev + 10);
       } else {
-        toast.error('❌ ลองใหม่อีกครั้ง');
+        toast.error('ลองใหม่อีกครั้ง');
         // Auto-reset wrong match after 1 second
         setTimeout(() => {
           setMatches(prev => {
@@ -160,6 +188,7 @@ const MockGamePage = () => {
     setMatches({});
     setTimeLeft(300);
     setShowConfetti(false);
+    setGameStartTime(null);
   };
 
   const formatTime = (seconds) => {
@@ -168,10 +197,11 @@ const MockGamePage = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getStarRating = () => {
-    if (score >= 90) return 3;
-    if (score >= 70) return 2;
-    if (score >= 50) return 1;
+  const getMedalRating = () => {
+    // For games: 100% = 3 medals (เหรียญทอง)
+    if (score >= 100) return 3;
+    if (score >= 80) return 2;
+    if (score >= 60) return 1;
     return 0;
   };
 
@@ -222,7 +252,7 @@ const MockGamePage = () => {
 
           <h1 className="text-3xl font-bold text-gray-900">{game.title}</h1>
           <p className="text-gray-600 mt-2">
-            {game.type === 'MATCHING' && '🎯 จับคู่คำกับรูปภาพให้ถูกต้อง'}
+            {game.type === 'MATCHING' && 'จับคู่คำกับรูปภาพให้ถูกต้อง'}
             {game.type === 'LINKING' && '🔗 โยงคำกับความหมาย'}
             {game.type === 'DRAG_DROP' && '🎯 ลากคำไปวางในตำแหน่งที่ถูกต้อง'}
           </p>
@@ -267,7 +297,7 @@ const MockGamePage = () => {
             <GameResult
               game={game}
               score={score}
-              stars={getStarRating()}
+              medals={getMedalRating()}
               onReset={resetGame}
               onExit={() => navigate('/dashboard/student')}
             />
@@ -287,7 +317,9 @@ const GameIntro = ({ game, onStart }) => {
       exit={{ opacity: 0, scale: 0.9 }}
       className="bg-white rounded-xl shadow-lg p-12 text-center"
     >
-      <div className="text-8xl mb-6">🎮</div>
+      <div className="mb-6 flex justify-center">
+        <div className="text-8xl">🎮</div>
+      </div>
       <div className="flex items-center justify-center gap-4 mb-4">
         <h2 className="text-3xl font-bold text-gray-900">{game.title}</h2>
         <button
@@ -301,14 +333,14 @@ const GameIntro = ({ game, onStart }) => {
 
       <div className="bg-purple-50 border border-purple-200 rounded-lg p-6 mb-8 max-w-2xl mx-auto">
         <div className="flex items-center gap-2 mb-4">
-          <h3 className="text-xl font-semibold text-purple-800">📖 วิธีเล่น:</h3>
+          <h3 className="text-xl font-semibold text-purple-800">วิธีเล่น:</h3>
           <button
             onClick={() => {
               const instructions = game.type === 'MATCHING'
-                ? 'จับคู่คำกับรูปภาพให้ถูกต้อง, คลิกคำ แล้วคลิกรูปภาพที่ตรงกัน'
+                ? 'จับคู่คำกับรูปภาพให้ถูกต้อง, คลิกคำ แล้วคลิกรูปภาพที่ตรงกัน, จับคู่ให้ถูกทั้งหมดให้เร็วที่สุด'
                 : game.type === 'DRAG_DROP'
-                  ? 'ลากคำไปวางในกลุ่มที่ถูกต้อง, แยกคำตามประเภทสระ'
-                  : 'โยงคำกับความหมายที่ถูกต้อง';
+                  ? 'ลากคำไปวางในกลุ่มที่ถูกต้อง, แยกคำตามประเภทสระ, จัดหมวดหมู่ให้ถูกทั้งหมด'
+                  : 'โยงคำกับความหมายที่ถูกต้อง, คลิกคำ แล้วคลิกความหมายที่ตรงกัน, โยงให้ถูกทั้งหมดให้เร็วที่สุด';
               speak(instructions);
             }}
             className="p-1 bg-purple-200 text-purple-700 rounded-full hover:bg-purple-300"
@@ -320,23 +352,50 @@ const GameIntro = ({ game, onStart }) => {
         <ul className="text-left space-y-2 text-gray-700">
           {game.type === 'MATCHING' && (
             <>
-              <li>✅ จับคู่คำกับรูปภาพให้ถูกต้อง</li>
-              <li>✅ คลิกคำ แล้วคลิกรูปภาพที่ตรงกัน</li>
-              <li>✅ จับคู่ให้ถูกทั้งหมดให้เร็วที่สุด</li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>จับคู่คำกับรูปภาพให้ถูกต้อง</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>คลิกคำ แล้วคลิกรูปภาพที่ตรงกัน</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>จับคู่ให้ถูกทั้งหมดให้เร็วที่สุด</span>
+              </li>
             </>
           )}
           {game.type === 'LINKING' && (
             <>
-              <li>✅ โยงคำกับความหมายที่ถูกต้อง</li>
-              <li>✅ คลิกคำ แล้วคลิกความหมายที่ตรงกัน</li>
-              <li>✅ โยงให้ถูกทั้งหมดให้เร็วที่สุด</li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>โยงคำกับความหมายที่ถูกต้อง</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>คลิกคำ แล้วคลิกความหมายที่ตรงกัน</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>โยงให้ถูกทั้งหมดให้เร็วที่สุด</span>
+              </li>
             </>
           )}
           {game.type === 'DRAG_DROP' && (
             <>
-              <li>✅ ลากคำไปวางในกลุ่มที่ถูกต้อง</li>
-              <li>✅ แยกคำตามประเภทสระ</li>
-              <li>✅ จัดหมวดหมู่ให้ถูกทั้งหมด</li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>ลากคำไปวางในกลุ่มที่ถูกต้อง</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>แยกคำตามประเภทสระ</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <span>จัดหมวดหมู่ให้ถูกทั้งหมด</span>
+              </li>
             </>
           )}
         </ul>
@@ -354,18 +413,21 @@ const GameIntro = ({ game, onStart }) => {
           <p className="font-bold text-gray-900">100 คะแนน</p>
         </div>
         <div className="text-center">
-          <Star className="text-purple-500 mx-auto mb-2" size={32} />
+          <Medal className="text-yellow-500 mx-auto mb-2" size={32} />
           <p className="text-sm text-gray-600">รางวัล</p>
-          <p className="font-bold text-gray-900">3 ดาว</p>
+          <p className="font-bold text-gray-900">3 เหรียญ</p>
         </div>
       </div>
 
+      <div className="flex justify-center">
       <button
         onClick={onStart}
-        className="px-12 py-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xl font-bold rounded-full hover:from-purple-600 hover:to-pink-600 transition shadow-lg"
+          className="px-12 py-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xl font-bold rounded-full hover:from-purple-600 hover:to-pink-600 transition shadow-lg flex items-center justify-center gap-2"
       >
-        🎮 เริ่มเล่น
+          <span className="text-2xl">🎮</span>
+          <span>เริ่มเล่น</span>
       </button>
+      </div>
     </motion.div>
   );
 };
@@ -404,7 +466,7 @@ const MatchingGame = ({ game, matches, selectedItem, onSelect, onMatch, onComple
       <div className="grid grid-cols-2 gap-8">
         {/* Words Column */}
         <div className="space-y-4">
-          <h3 className="text-center font-semibold text-gray-700 mb-4">📝 คำ</h3>
+          <h3 className="text-center font-semibold text-gray-700 mb-4">คำ</h3>
           {pairs.map((pair, index) => {
             const isMatched = matches[pair.word] !== undefined;
             const isSelected = selectedItem?.word === pair.word;
@@ -417,7 +479,7 @@ const MatchingGame = ({ game, matches, selectedItem, onSelect, onMatch, onComple
                 whileTap={{ scale: 0.95 }}
                 onClick={() => !isMatched && onSelect(pair)}
                 disabled={isMatched}
-                className={`w-full p-6 rounded-xl text-2xl font-bold transition shadow-md ${isSelected
+                className={`w-full h-[120px] p-6 rounded-xl text-2xl font-bold transition shadow-md flex items-center justify-center ${isSelected
                   ? 'bg-purple-500 text-white'
                   : isMatched
                     ? isCorrect
@@ -436,7 +498,7 @@ const MatchingGame = ({ game, matches, selectedItem, onSelect, onMatch, onComple
 
         {/* Images Column */}
         <div className="space-y-4">
-          <h3 className="text-center font-semibold text-gray-700 mb-4">🖼️ รูปภาพ</h3>
+          <h3 className="text-center font-semibold text-gray-700 mb-4">รูปภาพ</h3>
           {pairs.map((pair, index) => {
             const listMatches = Object.entries(matches);
             const matchedKey = listMatches.find(([key, val]) => val === pair.word)?.[0];
@@ -451,7 +513,7 @@ const MatchingGame = ({ game, matches, selectedItem, onSelect, onMatch, onComple
                 whileTap={{ scale: 0.95 }}
                 onClick={() => selectedItem && onMatch(selectedItem, pair)}
                 disabled={isMatched}
-                className={`w-full p-4 rounded-xl transition shadow-md flex items-center justify-center min-h-[100px] ${isMatched
+                className={`w-full h-[120px] p-6 rounded-xl transition shadow-md flex items-center justify-center ${isMatched
                   ? isCorrect
                     ? 'bg-green-100 border-2 border-green-500'
                     : 'bg-red-100 border-2 border-red-500'
@@ -516,7 +578,7 @@ const LinkingGame = ({ game, matches, onMatch, onComplete }) => {
       <div className="grid grid-cols-2 gap-8">
         {/* Words */}
         <div className="space-y-4">
-          <h3 className="text-center font-semibold text-gray-700 mb-4">📝 คำ</h3>
+          <h3 className="text-center font-semibold text-gray-700 mb-4">คำ</h3>
           {words.map((word, index) => (
             <motion.button
               key={index}
@@ -671,7 +733,7 @@ const DragDropGame = ({ game, matches, onMatch, onComplete }) => {
 };
 
 // Game Result Component
-const GameResult = ({ game, score, stars, onReset, onExit }) => {
+const GameResult = ({ game, score, medals, onReset, onExit }) => {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
@@ -696,14 +758,21 @@ const GameResult = ({ game, score, stars, onReset, onExit }) => {
         <p className="text-gray-600 mb-2">คะแนนที่ได้</p>
         <p className="text-6xl font-bold text-purple-600 mb-4">{score}</p>
 
+        <div className="flex flex-col items-center gap-3">
         <div className="flex justify-center gap-2">
           {[...Array(3)].map((_, i) => (
-            <Star
+              <Medal
               key={i}
               size={40}
-              className={i < stars ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}
+                className={i < medals ? 'text-yellow-500 fill-yellow-500' : 'text-gray-300'}
             />
           ))}
+          </div>
+          {medals > 0 && (
+            <p className="text-lg font-semibold text-gray-700">
+              ได้ {medals} เหรียญ{medals === 3 ? ' (เหรียญทอง)' : ''}
+            </p>
+          )}
         </div>
       </div>
 

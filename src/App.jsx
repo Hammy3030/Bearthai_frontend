@@ -85,6 +85,12 @@ function App() {
                     </ProtectedRoute>
                   } />
 
+                  <Route path="/dashboard/teacher/lessons/:lessonId" element={
+                    <ProtectedRoute role="TEACHER">
+                      <LessonDetailPage />
+                    </ProtectedRoute>
+                  } />
+
                   {/* Student Routes */}
                   <Route path="/dashboard/student" element={
                     <ProtectedRoute role="STUDENT">
@@ -99,13 +105,13 @@ function App() {
                   } />
 
                   <Route path="/dashboard/student/tests/:testId" element={
-                    <ProtectedRoute role="STUDENT">
+                    <ProtectedRoute>
                       <MockTestPage />
                     </ProtectedRoute>
                   } />
 
                   <Route path="/dashboard/student/games/:gameId" element={
-                    <ProtectedRoute role="STUDENT">
+                    <ProtectedRoute>
                       <MockGamePage />
                     </ProtectedRoute>
                   } />

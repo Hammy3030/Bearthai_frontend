@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -21,11 +21,16 @@ import { speakText, stopSpeech } from '../../utils/speechHelper';
 import { getApiUrl } from '../../utils/apiConfig';
 import HandwritingCanvas from '../../components/HandwritingCanvas';
 import { useAuth } from '../../contexts/AuthContext';
+import { getWritingGuide } from '../../utils/writingGuide';
+import WritingAnimation from '../../components/WritingAnimation';
 
 const LessonDetailPage = () => {
   const { lessonId } = useParams();
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { token, user } = useAuth();
+  const isTeacher = user?.role === 'TEACHER';
+  const classroomId = searchParams.get('classroomId');
 
   const [lesson, setLesson] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
@@ -40,6 +45,12 @@ const LessonDetailPage = () => {
   // Check unlock conditions before accessing lesson
   useEffect(() => {
     const checkUnlockConditions = async () => {
+      // Skip pre-test check for teachers
+      if (isTeacher) {
+        setIsLoadingStatus(false);
+        return;
+      }
+
       try {
         try {
           const preTestRes = await axios.get(
@@ -72,7 +83,7 @@ const LessonDetailPage = () => {
               if (status.preTestId) {
                 navigate(`/dashboard/student/tests/${status.preTestId}`);
               } else {
-                navigate('/dashboard/student');
+                navigate(isTeacher ? '/dashboard/teacher' : '/dashboard/student');
               }
               return;
             }
@@ -106,7 +117,7 @@ const LessonDetailPage = () => {
     if (lessonId) {
       checkUnlockConditions();
     }
-  }, [lessonId, navigate]);
+  }, [lessonId, navigate, isTeacher, token]);
 
   useEffect(() => {
     const fetchLesson = async () => {
@@ -124,7 +135,11 @@ const LessonDetailPage = () => {
       } catch (err) {
         console.error('Fetch lesson failed:', err?.response?.data || err?.message);
         toast.error('เกิดข้อผิดพลาดในการโหลดบทเรียน');
-        navigate('/dashboard/student');
+        if (isTeacher && classroomId) {
+          navigate(`/dashboard/teacher/classrooms/${classroomId}`);
+        } else {
+          navigate(isTeacher ? '/dashboard/teacher' : '/dashboard/student');
+        }
       }
     };
 
@@ -150,6 +165,12 @@ const LessonDetailPage = () => {
       </div>
     );
   }
+
+  // Remove colon after "บทที่ X:" in title
+  const formatLessonTitle = (title) => {
+    if (!title) return title;
+    return title.replace(/บทที่ (\d+):/g, 'บทที่ $1');
+  };
 
   // Generate dynamic lesson steps based on lesson type
   const generateLessonSteps = () => {
@@ -319,31 +340,67 @@ const LessonDetailPage = () => {
 
     const steps = [];
 
-    // Intro step
+    // Parse lesson content for intro and blending
+    let introData = null;
+    let blendingData = [];
+    let hasIntroSection = false;
+    if (lesson.content && lesson.content.includes('[MEDIA]')) {
+      try {
+        const mediaMatch = lesson.content.match(/\[MEDIA\]([\s\S]*?)\[\/MEDIA\]/);
+        if (mediaMatch && mediaMatch[1]) {
+          const mediaData = JSON.parse(mediaMatch[1]);
+          introData = mediaData.intro || null;
+          blendingData = mediaData.blending || [];
+          hasIntroSection = !!introData;
+        }
+      } catch (e) {
+        console.error('Failed to parse media content:', e);
+      }
+    }
+
+    // Intro step - For lessons 5-8 (with intro section) use IntroStep, for lessons 1-4 use ContentStep
+    if (hasIntroSection) {
+      // Lessons 5-8: Display text only (no images)
+      steps.push({
+        id: 'intro',
+        title: '📖 บทนำ',
+        type: 'intro',
+        content: {
+          title: `บทนำ: ${formatLessonTitle(lesson.title)}`,
+          intro: introData,
+          audio: introData?.audio || lesson.audioUrl,
+          vowelSound: introData?.vowelSound || null,
+          vowelText: introData?.vowelText || null
+        }
+      });
+    } else {
+      // Lessons 1-4: Display images from items array
     steps.push({
       id: 'intro',
       title: '📖 บทนำ',
       type: 'content',
       content: {
-        title: `บทนำ: ${lesson.title}`,
+        title: `บทนำ: ${formatLessonTitle(lesson.title)}`,
         description: lesson.content,
         audio: lesson.audioUrl
       }
     });
+    }
 
-    // Pronunciation step based on lesson type
-    if ((isConsonant || isVowel) && mainConcept) {
+    // Blending step - Show blending combinations
+    if (blendingData.length > 0) {
       steps.push({
-        id: 'pronunciation',
-        title: '🔊 การออกเสียง',
-        type: 'content',
+        id: 'blending',
+        title: '🔊 ผสมเสียง',
+        type: 'blending',
         content: {
-          title: 'วิธีอ่านและออกเสียง',
-          description: 'ฟังและฝึกออกเสียงตาม',
-          audio: lesson.audioUrl
+          title: 'ผสมเสียง',
+          blending: blendingData
         }
       });
     }
+
+    // Pronunciation step removed - no longer needed
 
     // Vocabulary step with dynamic words
     if (vocabularyWords.length > 0) {
@@ -363,29 +420,134 @@ const LessonDetailPage = () => {
               return {
                 word: wordItem.word,
                 meaning: wordItem.meaning || 'ตัวอย่างคำ',
-                emoji: wordItem.emoji || String.fromCodePoint(0x1F300 + idx)
+                emoji: wordItem.emoji || String.fromCodePoint(0x1F300 + idx),
+                image: wordItem.image || null, // Pass vocabImage from backend
+                primaryImage: wordItem.image || null, // Alias for vocabImage
+                fallbackImage: wordItem.image || null // Fallback to vocabImage
               };
             }
             return {
               word: wordItem,
               meaning: 'ตัวอย่างคำ',
-              emoji: String.fromCodePoint(0x1F300 + idx)
+              emoji: String.fromCodePoint(0x1F300 + idx),
+              image: null,
+              primaryImage: null,
+              fallbackImage: null
             };
           })
         }
       });
     }
 
-    // Add writing practice
-    if (mainConcept) {
+    // Add writing practice - Extract all consonants from lesson (only from lesson-specific data)
+    const getConsonantsFromLesson = () => {
+      const consonants = [];
+      let rangeStart = null;
+      let rangeEnd = null;
+      
+      // 1. Extract from lesson title range (e.g., "พยัญชนะ ก-ง")
+      // This gives us the exact range of consonants for this lesson - PRIMARY SOURCE
+      if (lessonContent) {
+        const rangeMatch = lessonContent.match(/พยัญชนะ\s+([ก-ฮ])-([ก-ฮ])/);
+        if (rangeMatch) {
+          rangeStart = rangeMatch[1];
+          rangeEnd = rangeMatch[2];
+          const startCode = rangeStart.charCodeAt(0);
+          const endCode = rangeEnd.charCodeAt(0);
+          
+          // Generate all consonants in the range
+          for (let code = startCode; code <= endCode; code++) {
+            const char = String.fromCharCode(code);
+            if (/[ก-ฮ]/.test(char)) {
+              consonants.push(char);
+            }
+          }
+        }
+      }
+      
+      // 2. Extract from [MEDIA] block - get all single character consonants from items
+      // Only add if they're within the range (if range exists)
+      if (lesson.content && lesson.content.includes('[MEDIA]')) {
+        try {
+          const mediaMatch = lesson.content.match(/\[MEDIA\]([\s\S]*?)\[\/MEDIA\]/);
+          if (mediaMatch && mediaMatch[1]) {
+            const mediaData = JSON.parse(mediaMatch[1]);
+            if (mediaData.items && Array.isArray(mediaData.items)) {
+              mediaData.items.forEach(item => {
+                const word = item.word || item;
+                // Only add single character Thai consonants (not words like "กา", "ขา")
+                if (word && word.length === 1 && /[ก-ฮ]/.test(word)) {
+                  // If we have a range, only add if it's within the range
+                  if (rangeStart && rangeEnd) {
+                    const charCode = word.charCodeAt(0);
+                    const startCode = rangeStart.charCodeAt(0);
+                    const endCode = rangeEnd.charCodeAt(0);
+                    if (charCode >= startCode && charCode <= endCode && !consonants.includes(word)) {
+                      consonants.push(word);
+                    }
+                  } else if (!consonants.includes(word)) {
+                    consonants.push(word);
+                  }
+                }
+              });
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse media content for consonants:', e);
+        }
+      }
+      
+      // 3. Extract from vocabulary words (only if within range)
+      // These are the consonants that appear in vocabulary words of this lesson
+      if (vocabularyWords.length > 0 && rangeStart && rangeEnd) {
+        const startCode = rangeStart.charCodeAt(0);
+        const endCode = rangeEnd.charCodeAt(0);
+        
+        vocabularyWords.forEach(item => {
+          const word = typeof item === 'object' ? item.word : item;
+          // Extract first character if it's a consonant (e.g., "กา" -> "ก")
+          if (word && word.length > 0) {
+            const firstChar = word.charAt(0);
+            if (firstChar.length === 1 && /[ก-ฮ]/.test(firstChar)) {
+              const charCode = firstChar.charCodeAt(0);
+              // Only add if within range
+              if (charCode >= startCode && charCode <= endCode && !consonants.includes(firstChar)) {
+                consonants.push(firstChar);
+              }
+            }
+          }
+        });
+      }
+      
+      // 4. Final fallback: use mainConcept (only if within range)
+      if (consonants.length === 0 && mainConcept) {
+        if (rangeStart && rangeEnd) {
+          const charCode = mainConcept.charCodeAt(0);
+          const startCode = rangeStart.charCodeAt(0);
+          const endCode = rangeEnd.charCodeAt(0);
+          if (charCode >= startCode && charCode <= endCode) {
+            consonants.push(mainConcept);
+          }
+        } else {
+          consonants.push(mainConcept);
+        }
+      }
+      
+      // Remove duplicates and sort consonants to maintain order
+      const uniqueConsonants = [...new Set(consonants)];
+      return uniqueConsonants.sort((a, b) => a.localeCompare(b, 'th'));
+    };
+    
+    const consonantsToPractice = getConsonantsFromLesson();
+    if (consonantsToPractice.length > 0) {
       steps.push({
         id: 'activity-writing',
         title: '✍️ กิจกรรม: ฝึกเขียน',
         type: 'activity-writing',
         content: {
-          question: 'ลากนิ้วเขียนตามจุดประ',
-          word: mainConcept,
-          strokes: mainConcept.split('')
+          question: 'ลากนิ้วเขียนตามเส้นประ',
+          words: consonantsToPractice, // Array of consonants to practice
+          word: consonantsToPractice[0] // First word for backward compatibility
         }
       });
     }
@@ -444,8 +606,26 @@ const LessonDetailPage = () => {
 
       setShowConfetti(true);
       toast.success('ยินดีด้วย! เรียนจบบทเรียนแล้ว');
+      
+      // Refresh posttest status after completing lesson
+      try {
+        const postTestRes = await axios.get(
+          getApiUrl(`/student/lessons/${lessonId}/post-test-status`),
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (postTestRes.data?.success) {
+          setPostTestStatus(postTestRes.data.data);
+        }
+      } catch (err) {
+        console.warn('Post-test status refresh failed:', err);
+      }
+      
       setTimeout(() => {
-        navigate('/dashboard/student');
+        if (isTeacher && classroomId) {
+          navigate(`/dashboard/teacher/classrooms/${classroomId}`);
+        } else {
+          navigate(isTeacher ? '/dashboard/teacher' : '/dashboard/student');
+        }
       }, 3000);
     } catch (error) {
       console.error('Complete lesson error:', error);
@@ -513,6 +693,10 @@ const LessonDetailPage = () => {
     const step = lessonSteps[currentStep];
 
     switch (step.type) {
+      case 'intro':
+        return <IntroStep step={step} playAudio={playAudio} />;
+      case 'blending':
+        return <BlendingStep step={step} playAudio={playAudio} />;
       case 'content':
         return <ContentStep step={step} playAudio={playAudio} />;
       case 'vocabulary':
@@ -560,7 +744,13 @@ const LessonDetailPage = () => {
         >
           <div className="flex items-center justify-between mb-4">
             <button
-              onClick={() => navigate('/dashboard/student')}
+              onClick={() => {
+                if (isTeacher && classroomId) {
+                  navigate(`/dashboard/teacher/classrooms/${classroomId}`);
+                } else {
+                  navigate(isTeacher ? '/dashboard/teacher' : '/dashboard/student');
+                }
+              }}
               className="flex items-center gap-2 text-gray-600 hover:text-blue-600 transition"
             >
               <ArrowLeft size={20} />
@@ -575,7 +765,7 @@ const LessonDetailPage = () => {
             </div>
           </div>
 
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{lesson.title}</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">{formatLessonTitle(lesson.title)}</h1>
 
           {/* Progress Bar */}
           <div className="mb-4">
@@ -661,6 +851,119 @@ const LessonDetailPage = () => {
             )}
           </button>
         </motion.div>
+      </div>
+    </div>
+  );
+};
+
+// Intro Step Component - Enhanced with vowel images
+const IntroStep = ({ step, playAudio }) => {
+  const intro = step.content.intro;
+
+  // Extract vowel name from lesson title
+  const lessonTitle = step.content.title || '';
+  const vowelMatch = lessonTitle.match(/สระ (.+?)(?:\s|$)/);
+  const vowelName = vowelMatch ? vowelMatch[1] : 'อา';
+
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-4xl font-bold text-gray-900 mb-8 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+          {step.content.title}
+        </h2>
+
+        {/* Intro Content - Enhanced with vowel image */}
+        <div className="bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 rounded-2xl p-10 mb-6 border-2 border-blue-200 shadow-lg space-y-8">
+          {/* Vowel Image Display - Large and Centered */}
+          {intro?.vowelImage && (
+            <div className="flex justify-center my-8">
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.5 }}
+                className="bg-white rounded-2xl p-4 shadow-2xl border-4 border-blue-300 max-w-4xl w-full"
+              >
+                <img
+                  src={intro.vowelImage}
+                  alt={`สระ${vowelName}`}
+                  className="w-full h-auto object-contain rounded-xl"
+                  onError={(e) => {
+                    // Fallback if image doesn't exist
+                    e.target.style.display = 'none';
+                  }}
+                />
+              </motion.div>
+            </div>
+          )}
+
+          {/* Vowel Sound Button - Enhanced */}
+          {intro?.vowelSound && (
+            <div className="flex justify-center mt-8">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  playAudio(intro.vowelSound, `สระ${vowelName} ${intro.vowelSound}`);
+                }}
+                className="flex items-center gap-4 px-10 py-5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-full font-bold text-lg hover:from-green-600 hover:to-emerald-700 transition shadow-xl hover:shadow-2xl"
+              >
+                <Volume2 size={28} />
+                <span>ฟังเสียงสระ{vowelName}</span>
+                <span className="text-green-100">({intro.vowelSound})</span>
+              </motion.button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Blending Step Component
+const BlendingStep = ({ step, playAudio }) => {
+  const blending = step.content.blending || [];
+
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-gray-900 mb-6">
+          {step.content.title}
+        </h2>
+
+        {/* Blending Combinations */}
+        <div className="space-y-4">
+          {blending.map((item, index) => (
+            <motion.div
+              key={index}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+              className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-6 border border-blue-200"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex-1">
+                  <p className="text-2xl font-bold text-gray-800">
+                    <span className="text-blue-600">{item.consonant}</span> + <span className="text-purple-600">{item.vowel}</span> → <span className="text-green-600">{item.word}</span>
+                  </p>
+                </div>
+                {item.audio && (
+                  <button
+                    onClick={() => playAudio(item.audio, item.audio)}
+                    className="p-3 bg-green-500 text-white rounded-full hover:bg-green-600 transition shadow-lg ml-4"
+                    title="ฟังเสียง"
+                  >
+                    <Volume2 size={24} />
+                  </button>
+                )}
+              </div>
+              {item.audio && (
+                <p className="text-sm text-gray-600 text-center">
+                  ปุ่มฟังเสียง "{item.audio}"
+                </p>
+              )}
+            </motion.div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -805,43 +1108,24 @@ const VocabularyStep = ({ step, playAudio }) => {
   useEffect(() => {
     let source = null;
 
-    // HARDCODED FIX: Specific mapping for Lesson 1 to ensure correct "Object" images for Consonants
-    // This overrides any dynamic path or backend data to guarantee 100% correctness for user
-    if (String(lessonNumber) === '1') {
-      const lesson1Map = {
-        'ก': 'ไก่.png',
-        'ข': 'ไข่.png',
-        'ฃ': null, // No image commonly used or provided
-        'ค': 'ควาย.png',
-        'ฅ': 'คน.png', // User confirmed this file exists
-        'ฆ': 'ระฆัง.png',
-        'ง': 'งู.png',
-        'จ': 'จาน.png', // Just in case lesson 2 overlaps or similar logic needed
-        'ฉ': 'ฉิ่ง.png'
-      };
-
-      // Use map if word exists in it
-      const cleanWord = currentWord.word ? currentWord.word.trim() : '';
-      if (cleanWord && lesson1Map[cleanWord]) {
-        source = `/คำศัพท์บท1-4/บทที่1/${lesson1Map[cleanWord]}`;
-      }
+    // Priority 1: Use image from backend (vocabImage) if available
+    if (currentWord.image) {
+      source = currentWord.image;
     }
 
-    // If no hardcoded source, try the primaryImage from backend (which should be correct now)
+    // Priority 2: Try primaryImage alias
     if (!source && currentWord.primaryImage) {
       source = currentWord.primaryImage;
     }
 
-    // Fallback: try constructing path if we have a word (Risk of 404 if file missing, but useful for secondary words)
+    // Priority 3: Fallback - construct path if we have a word and lesson number
+    // Supports lessons 1-8 (บทที่1 to บทที่8) - use correct folder path
     if (!source && lessonNumber && currentWord.word) {
-      // Only do this if it's NOT a single letter consonant that we missed in the map, 
-      // OR if it's a full word like "กา"
-      // Supports lessons 1-8 (บทที่1 to บทที่8)
+      // Only do this if it's a full word (length > 1), not a single consonant
       if (currentWord.word.length > 1) {
         const lessonNum = parseInt(lessonNumber);
-        // Use the correct folder path based on lesson number
         if (lessonNum >= 1 && lessonNum <= 8) {
-          source = `/คำศัพท์บท1-4/บทที่${lessonNumber}/${currentWord.word}.png`;
+          source = `/คำศัพท์บท1-8/บทที่${lessonNumber}/${currentWord.word}.png`;
         }
       }
     }
@@ -987,7 +1271,7 @@ const ListeningActivity = ({ step, playAudio, onAnswer, currentAnswer }) => {
 
     const isCorrect = step.content.options[optionIndex].isCorrect;
     if (isCorrect) {
-      toast.success('🎉 ถูกต้อง!');
+      toast.success('ถูกต้อง 🎉');
     } else {
       toast.error('❌ ลองใหม่อีกครั้ง');
     }
@@ -1068,7 +1352,7 @@ const MatchingActivity = ({ step, onAnswer, currentAnswer }) => {
 
       // Check if correct
       if (selectedWord.id === imageObj.id) {
-        toast.success('✅ ถูกต้อง!');
+        toast.success('ถูกต้อง');
       } else {
         toast.error('❌ ลองใหม่อีกครั้ง');
       }
@@ -1151,7 +1435,11 @@ const MatchingActivity = ({ step, onAnswer, currentAnswer }) => {
 
 // Writing Activity Step Component
 const WritingActivityStep = ({ step, onComplete }) => {
-  const wordToWrite = step.content.word || 'ก';
+  // Support both single word and multiple words
+  const words = step.content.words || (step.content.word ? [step.content.word] : ['ก']);
+  const [currentWordIndex, setCurrentWordIndex] = useState(0);
+  const [completedWords, setCompletedWords] = useState(new Set());
+  const wordToWrite = words[currentWordIndex];
   const [isCompleted, setIsCompleted] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [detectedText, setDetectedText] = useState('');
@@ -1159,6 +1447,49 @@ const WritingActivityStep = ({ step, onComplete }) => {
   const [aiExplanation, setAiExplanation] = useState('');
   const canvasRef = useRef(null);
   const { token } = useAuth();
+  
+  // Get writing guide for current character
+  const writingGuide = getWritingGuide(wordToWrite);
+
+  // Draw guide (dotted line) on canvas
+  const drawGuide = (char) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    // Save current state
+    ctx.save();
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Configure Guide Style (Gray Dashed)
+    const dpr = window.devicePixelRatio || 1;
+    ctx.font = `bold ${180 * dpr}px "Noto Sans Thai", "Sarabun", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = '#9CA3AF'; // Gray-400
+    ctx.lineWidth = 4 * dpr;
+    ctx.setLineDash([15 * dpr, 15 * dpr]); // Dashed Line
+    
+    // Draw Guide
+    const centerX = (canvas.width / dpr) / 2;
+    const centerY = (canvas.height / dpr) / 2 + 15;
+    ctx.strokeText(char, centerX, centerY);
+    
+    // Restore state
+    ctx.restore();
+  };
+
+  // Initialize guide when word changes
+  useEffect(() => {
+    if (wordToWrite && canvasRef.current) {
+      // Wait for canvas to be ready
+      setTimeout(() => {
+        drawGuide(wordToWrite);
+      }, 100);
+    }
+  }, [wordToWrite]);
 
   // Check if canvas is empty
   const isCanvasEmpty = () => {
@@ -1225,9 +1556,38 @@ const WritingActivityStep = ({ step, onComplete }) => {
       setAiExplanation(result.explanation || '');
 
       if (result.isCorrect) {
-        setIsCompleted(true);
-        onComplete(step.id, wordToWrite, result.isCorrect, result.isCorrect ? 100 : 0);
-        toast.success(`ถูกต้อง! 🎉 (ความมั่นใจ: ${result.confidence || 0}%)`);
+        // Mark current word as completed
+        setCompletedWords(prev => new Set([...prev, wordToWrite]));
+        
+        // Check if all words are completed
+        const allCompleted = words.every(w => completedWords.has(w) || w === wordToWrite);
+        
+        if (allCompleted) {
+          setIsCompleted(true);
+          onComplete(step.id, wordToWrite, result.isCorrect, result.isCorrect ? 100 : 0);
+          toast.success(`🎉 ยอดเยี่ยม! เขียนครบทุกตัวแล้ว!`);
+        } else {
+          // Move to next word
+          const nextIndex = words.findIndex((w, idx) => idx > currentWordIndex && !completedWords.has(w));
+          if (nextIndex !== -1) {
+            setCurrentWordIndex(nextIndex);
+            // Clear canvas for next word
+            const canvas = canvasRef.current;
+            if (canvas) {
+              const ctx = canvas.getContext('2d');
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              // Redraw guide for next word
+              drawGuide(words[nextIndex]);
+            }
+            setDetectedText('');
+            setIsCorrect(null);
+            toast.success(`ถูกต้อง 🎉 ต่อไป: ${words[nextIndex]}`);
+          } else {
+            setIsCompleted(true);
+            onComplete(step.id, wordToWrite, result.isCorrect, result.isCorrect ? 100 : 0);
+            toast.success(`🎉 ยอดเยี่ยม! เขียนครบทุกตัวแล้ว!`);
+          }
+        }
       } else {
         toast.error('ยังไม่ถูกต้อง ลองอีกครั้ง');
       }
@@ -1251,39 +1611,148 @@ const WritingActivityStep = ({ step, onComplete }) => {
     await checkHandwriting();
   };
 
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Redraw guide
+    drawGuide(wordToWrite);
+    setDetectedText('');
+    setIsCorrect(null);
+  };
+
+  const handleNextWord = () => {
+    if (currentWordIndex < words.length - 1) {
+      setCurrentWordIndex(currentWordIndex + 1);
+      clearCanvas();
+    }
+  };
+
+  const handlePrevWord = () => {
+    if (currentWordIndex > 0) {
+      setCurrentWordIndex(currentWordIndex - 1);
+      clearCanvas();
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 px-4">
       <div className="text-center">
-        <h2 className="text-3xl font-bold text-gray-900 mb-4">
+        <h2 className="text-3xl font-bold text-gray-900 mb-2">
           ✍️ กิจกรรม: ฝึกเขียน
         </h2>
         <p className="text-lg text-gray-600 mb-6">
-          {step.content.question || 'ลากนิ้วเขียนตามจุดประ'}
+          {step.content.question || 'ลากนิ้วเขียนตามเส้นประ'}
         </p>
       </div>
 
-      {/* Word to write */}
-      <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-8 text-center mb-6">
-        <p className="text-sm text-gray-600 mb-2">เขียนคำว่า:</p>
-        <div className="text-8xl font-bold text-blue-600 mb-4">{wordToWrite}</div>
-        <p className="text-gray-600">ใช้เมาส์หรือนิ้วลากเขียนบนกระดานด้านล่าง</p>
-      </div>
+      {/* Progress indicator */}
+      {words.length > 1 && (
+        <div className="text-center mb-6 bg-white rounded-lg p-4 shadow-sm">
+          <p className="text-sm font-semibold text-gray-700 mb-3">
+            ตัวที่ {currentWordIndex + 1} จาก {words.length}
+          </p>
+          <div className="flex justify-center gap-2">
+            {words.map((w, idx) => (
+              <div
+                key={idx}
+                className={`w-4 h-4 rounded-full transition-all ${
+                  idx === currentWordIndex
+                    ? 'bg-blue-600 scale-125'
+                    : completedWords.has(w)
+                    ? 'bg-green-500'
+                    : 'bg-gray-300'
+                }`}
+                title={w}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
-      {/* Handwriting Canvas */}
-      <div className="flex justify-center">
-        <div className="relative">
-          <HandwritingCanvas
-            canvasRef={canvasRef}
-            width={400}
-            height={400}
-            strokeColor="#2563eb"
-            strokeWidth={8}
-            onComplete={handleWritingComplete}
-          />
-          {isChecking && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 rounded-xl">
-              <Loader className="w-8 h-8 text-white animate-spin mb-4" />
-              <p className="text-white font-semibold">AI กำลังตรวจสอบ...</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column: Word Display & Instructions */}
+        <div className="space-y-4">
+          {/* Word to write */}
+          <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-6 text-center shadow-md">
+            <p className="text-sm text-gray-600 mb-3">เขียนคำว่า:</p>
+            <div className="text-7xl font-bold text-blue-600 mb-4">{wordToWrite}</div>
+            
+            {/* Writing Animation Guide - Moved to top */}
+            <div className="bg-white bg-opacity-80 rounded-lg p-4 mb-3">
+              <p className="text-sm font-semibold text-gray-700 text-center mb-3">
+                💡 ดูตัวอย่างการเขียน:
+              </p>
+              <WritingAnimation character={wordToWrite} />
+            </div>
+            
+            {/* Writing Guide Instructions - Moved to bottom */}
+            <div className="bg-white bg-opacity-80 rounded-lg p-4 mb-3">
+              <p className="text-sm font-semibold text-gray-800 mb-2">
+                📝 วิธีเขียน: {writingGuide.direction}
+              </p>
+              <ul className="text-xs text-gray-700 space-y-1 text-left max-w-sm mx-auto">
+                {writingGuide.steps.map((step, idx) => (
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">{step.split('.')[0]}</span>
+                    <span>{step.substring(step.indexOf(' ') + 1)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            
+            <p className="text-sm text-gray-600">ใช้เมาส์หรือนิ้วลากเขียนตามเส้นประ</p>
+          </div>
+        </div>
+
+        {/* Right Column: Handwriting Canvas */}
+        <div className="flex flex-col gap-4">
+          <div className="relative w-full flex-1">
+            <HandwritingCanvas
+              canvasRef={canvasRef}
+              width={500}
+              height={500}
+              strokeColor="#2563eb"
+              strokeWidth={16}
+              onComplete={handleWritingComplete}
+              guideCharacter={wordToWrite}
+            />
+            {isChecking && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 rounded-xl">
+                <Loader className="w-8 h-8 text-white animate-spin mb-4" />
+                <p className="text-white font-semibold">AI กำลังตรวจสอบ...</p>
+              </div>
+            )}
+          </div>
+          
+          {/* Navigation buttons for multiple words - Right aligned */}
+          {words.length > 1 && (
+            <div className="flex items-center gap-4 justify-end">
+              <button
+                onClick={handlePrevWord}
+                disabled={currentWordIndex === 0}
+                className={`px-6 py-2 rounded-lg font-medium transition ${
+                  currentWordIndex === 0
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4 inline mr-1" />
+                คำก่อนหน้า
+              </button>
+              <button
+                onClick={handleNextWord}
+                disabled={currentWordIndex === words.length - 1}
+                className={`px-6 py-2 rounded-lg font-medium transition ${
+                  currentWordIndex === words.length - 1
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-blue-500 text-white hover:bg-blue-600 shadow-md'
+                }`}
+              >
+                คำถัดไป
+                <ChevronRight className="w-4 h-4 inline ml-1" />
+              </button>
             </div>
           )}
         </div>
@@ -1307,7 +1776,7 @@ const WritingActivityStep = ({ step, onComplete }) => {
             )}
             <div className="flex-1">
               <p className="font-medium text-gray-800 mb-1">
-                {isCorrect ? '✨ ถูกต้อง!' : '❌ ยังไม่ถูกต้อง'}
+                {isCorrect ? 'ถูกต้อง' : 'ยังไม่ถูกต้อง'}
               </p>
               <p className="text-sm text-gray-600 mb-2">
                 AI อ่านได้: <span className="font-bold text-lg">{detectedText || '-'}</span>
