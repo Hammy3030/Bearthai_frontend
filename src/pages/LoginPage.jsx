@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, BookOpen, GraduationCap } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import Logo from '../../public/favicon.svg';
 
 const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -52,7 +53,7 @@ const LoginPage = () => {
             transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
             className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full mb-4"
           >
-            <BookOpen className="w-8 h-8 text-white" />
+            <img src={Logo } alt="Logo" width="50" />
           </motion.div>
           <h1 className="text-3xl font-bold text-gray-800 mb-2">BearThai</h1>
           <p className="text-gray-600">ระบบเรียนภาษาไทย ป.1 แบบ Interactive</p>
