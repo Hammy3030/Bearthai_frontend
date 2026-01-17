@@ -25,13 +25,13 @@ export const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
     // If not localhost, always use production backend
     if (hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.includes('192.168.') && !hostname.includes('10.')) {
-      baseUrl = 'https://bearthai-backend.vercel.app';
+      baseUrl = 'https://bearthai-backend-self.vercel.app/';
       source = `hostname: ${hostname}`;
     }
   }
   // Priority 3: Check build mode
   if (!baseUrl && import.meta.env.MODE === 'production') {
-    baseUrl = 'https://bearthai-backend.vercel.app';
+    baseUrl = 'https://bearthai-backend-self.vercel.app/';
     source = 'production mode';
   }
   // Priority 4: Default to localhost for development

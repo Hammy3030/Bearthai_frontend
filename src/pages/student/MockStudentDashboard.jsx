@@ -11,7 +11,8 @@ import {
   Play,
   Star,
   Info,
-  Pen
+  Pen,
+  FileText
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import axios from 'axios';
@@ -45,24 +46,7 @@ const MockStudentDashboard = () => {
   const [currentGamePage, setCurrentGamePage] = useState(1);
   const gamesPerPage = 6;
 
-  useEffect(() => {
-    // Load lessons for student's classroom
-    if (user?.id) {
-      fetchStudentData();
-    }
-  }, [user, fetchStudentData]);
-
-  // Refresh data when component is focused (e.g., when returning from lesson page)
-  useEffect(() => {
-    const handleFocus = () => {
-      if (user?.id) {
-        fetchStudentData();
-      }
-    };
-    
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [user, fetchStudentData]);
+  
 
   const fetchStudentData = useCallback(async () => {
     try {
@@ -183,6 +167,27 @@ const MockStudentDashboard = () => {
       }
     }
   }, [user]);
+
+
+  // Load lessons for student's classroom
+  useEffect(() => {
+    if (user?.id) {
+      fetchStudentData();
+    }
+  }, [user, fetchStudentData]);
+
+  // Refresh data when component is focused (e.g., when returning from lesson page)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (user?.id) {
+        fetchStudentData();
+      }
+    };
+    
+    
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [user, fetchStudentData]);
 
   const handleLogout = useCallback(async () => {
     await logout();
